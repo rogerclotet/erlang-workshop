@@ -3,7 +3,7 @@
 -export([start/2]).
 
 %% Creates a star with N processes connected to him
-%% and pass to each one a message M time.
+%% and pass to each one a message M times.
 start(N, M) -> start_processes(N, N, M).
 
 start_processes(NTotal, 0, _) ->

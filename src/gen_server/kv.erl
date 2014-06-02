@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 %% Start server
--export([start_link/2]).
+-export([start_link/3]).
 
 %% Server API
 -export([set/2, set/3, get/1]).
@@ -11,37 +11,35 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--record(state, {value}).
--define(SERVER, ?MODULE).
+-record(state, {key, value}).
 
 %% GEN_SERVER (kv processes)
-start_link(Key, Args) ->
-    gen_server:start_link({global, get_global(Key)}, ?MODULE, Args, []).
+start_link(Key, Value, Timeout) ->
+    gen_server:start_link({global, get_global(Key)}, ?MODULE, [Key, Value, Timeout], []).
 
-init([Value]) ->
-    {ok, #state{value = Value}};
-init([Value, Timeout]) ->
-    {ok, #state{value = Value}, Timeout}.
+init([Key, Value, Timeout]) ->
+    {ok, #state{key = Key, value = Value}, Timeout}.
 
 handle_call(Request, _From, State) ->
     case Request of
         get ->
-            {reply, State#state.value, State};
+            {reply, State#state.value, State}
+    end.
 
+handle_cast(Msg, State) ->
+    case Msg of
         {set, Value} ->
             {noreply, State#state{value = Value}};
         {set, Value, Timeout} ->
             {noreply, State#state{value = Value}, Timeout}
     end.
 
-handle_cast(_Msg, State) ->
-    {noreply, State}.
+handle_info(timeout, State) ->
+    io:format("Timeout received~n"),
+    {stop, normal, State}.
 
-handle_info(_Info, State) ->
-    {stop, timeout, State}.
-
-terminate(_Reason, _State) ->
-    io:format("Key timed out"),
+terminate(_Reason, State) ->
+    io:format("Key ~p timed out~n", [State#state.key]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -59,9 +57,9 @@ get(Key) ->
 set_value(Key, Value, Timeout) ->
     case is_set(Key) of
         true ->
-            gen_server:call({global, get_global(Key)}, {set, Value, Timeout});
+            gen_server:cast({global, get_global(Key)}, {set, Value, Timeout});
         false ->
-            {ok, _} = kv:start_link(Key, [Value, Timeout])
+            {ok, _} = kv:start_link(Key, Value, Timeout)
     end,
     ok.
 

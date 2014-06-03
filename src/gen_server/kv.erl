@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 %% Start server
--export([start_link/3]).
+-export([start_link/1]).
 
 %% Server API
 -export([set/2, set/3, get/1]).
@@ -14,11 +14,16 @@
 -record(state, {key, value}).
 
 %% GEN_SERVER (kv processes)
-start_link(Key, Value, Timeout) ->
-    gen_server:start_link({global, get_global(Key)}, ?MODULE, [Key, Value, Timeout], []).
+start_link([Key, Value]) ->
+    gen_server:start_link({global, get_global(Key)}, ?MODULE, [Key, Value], []);
+start_link([Key, Value, Expire]) ->
+    gen_server:start_link({global, get_global(Key)}, ?MODULE, [Key, Value, Expire], []).
 
-init([Key, Value, Timeout]) ->
-    {ok, #state{key = Key, value = Value}, Timeout}.
+init([Key, Value]) ->
+    {ok, #state{key = Key, value = Value}};
+init([Key, Value, Expire]) ->
+    timer:send_after(Expire, expire),
+    {ok, #state{key = Key, value = Value}}.
 
 handle_call(Request, _From, State) ->
     case Request of
@@ -30,16 +35,16 @@ handle_cast(Msg, State) ->
     case Msg of
         {set, Value} ->
             {noreply, State#state{value = Value}};
-        {set, Value, Timeout} ->
-            {noreply, State#state{value = Value}, Timeout}
+        {set, Value, Expire} ->
+            timer:send_after(Expire, expire),
+            {noreply, State#state{value = Value}}
     end.
 
-handle_info(timeout, State) ->
-    io:format("Timeout received~n"),
+handle_info(expire, State) ->
     {stop, normal, State}.
 
 terminate(_Reason, State) ->
-    io:format("Key ~p timed out~n", [State#state.key]),
+    io:format("Key ~p expired~n", [State#state.key]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -48,18 +53,25 @@ code_change(_OldVsn, State, _Extra) ->
 %% KV API
 set(Key, Value) ->
     set_value(Key, Value, infinity).
-set(Key, Value, Timeout) ->
-    set_value(Key, Value, Timeout).
+set(Key, Value, Expire) ->
+    set_value(Key, Value, Expire).
 
 get(Key) ->
     get_value(Key).
 
-set_value(Key, Value, Timeout) ->
+set_value(Key, Value, Expire) ->
     case is_set(Key) of
         true ->
-            gen_server:cast({global, get_global(Key)}, {set, Value, Timeout});
+            Message = if
+                Expire =:= infinity -> {set, Value};
+                true -> {set, Value, Expire}
+            end,
+            gen_server:cast({global, get_global(Key)}, Message);
         false ->
-            {ok, _} = kv:start_link(Key, Value, Timeout)
+            {ok, _} = if
+                Expire =:= infinity -> kv:start_link([Key, Value]);
+                true -> kv:start_link([Key, Value, Expire])
+            end
     end,
     ok.
 

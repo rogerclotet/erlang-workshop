@@ -51,31 +51,17 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% KV API
 set(Key, Value) ->
-    set_value(Key, Value, infinity).
+    set(Key, Value, infinity).
 set(Key, Value, Expire) ->
-    set_value(Key, Value, Expire).
-
-get(Key) ->
-    get_value(Key).
-
-set_value(Key, Value, Expire) ->
     case global:whereis_name({kv, Key}) of
         undefined ->
-            {ok, _} = if
-                Expire =:= infinity -> kv:start_link([Key, Value]);
-                true -> kv:start_link([Key, Value, Expire])
-            end;
+            {ok, _} = kv:start_link([Key, Value, Expire]);
         Pid ->
-            Message = if
-                Expire =:= infinity -> {set, Value};
-                true -> {set, Value, Expire}
-            end,
-            gen_server:cast(Pid, Message)
+            gen_server:cast(Pid, {set, Value, Expire})
     end,
-
     ok.
 
-get_value(Key) ->
+get(Key) ->
     case global:whereis_name({kv, Key}) of
         undefined ->
             undefined;

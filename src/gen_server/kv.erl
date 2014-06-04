@@ -15,7 +15,7 @@
 
 %% GEN_SERVER (kv processes)
 start_link([Key, Value, Expire]) ->
-    gen_server:start_link({global, get_global(Key)}, ?MODULE, [Key, Value, Expire], []).
+    gen_server:start_link({global, {kv, Key}}, ?MODULE, [Key, Value, Expire], []).
 
 init([Key, Value, Expire]) ->
     {ok, #state{key = Key, value = Value, expire = Expire}, 0}.
@@ -72,19 +72,13 @@ set_value(Key, Value, Expire) ->
             end,
             gen_server:cast(Pid, Message)
     end,
+
     ok.
 
 get_value(Key) ->
-    case is_set(Key) of
-        true ->
-            gen_server:call({global, get_global(Key)}, get);
-        false ->
-            undefined
+    case global:whereis_name({kv, Key}) of
+        undefined ->
+            undefined;
+        Pid ->
+            gen_server:call(Pid, get)
     end.
-
-is_set(Key) ->
-    Pid = global:whereis_name(get_global(Key)),
-    is_pid(Pid).
-
-get_global(Key) ->
-    {kv, Key}.

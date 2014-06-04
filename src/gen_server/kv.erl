@@ -11,25 +11,17 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--record(state, {key, value}).
+-record(state, {key, value, expire}).
 
 %% GEN_SERVER (kv processes)
-start_link([Key, Value]) ->
-    gen_server:start_link({global, get_global(Key)}, ?MODULE, [Key, Value], []);
 start_link([Key, Value, Expire]) ->
     gen_server:start_link({global, get_global(Key)}, ?MODULE, [Key, Value, Expire], []).
 
-init([Key, Value]) ->
-    {ok, #state{key = Key, value = Value}};
 init([Key, Value, Expire]) ->
-    timer:send_after(Expire, expire),
-    {ok, #state{key = Key, value = Value}}.
+    {ok, #state{key = Key, value = Value, expire = Expire}, 0}.
 
-handle_call(Request, _From, State) ->
-    case Request of
-        get ->
-            {reply, State#state.value, State}
-    end.
+handle_call(get, _From, State) ->
+    {reply, State#state.value, State}.
 
 handle_cast(Msg, State) ->
     case Msg of
@@ -40,6 +32,13 @@ handle_cast(Msg, State) ->
             {noreply, State#state{value = Value}}
     end.
 
+handle_info(timeout, State) ->
+    case State#state.expire of
+        infinity -> {noreply, State};
+        Expire ->
+            Ref = timer:send_after(Expire, expire),
+            {noreply, State#state{expire = Ref}}
+    end;
 handle_info(expire, State) ->
     {stop, normal, State}.
 
@@ -60,18 +59,18 @@ get(Key) ->
     get_value(Key).
 
 set_value(Key, Value, Expire) ->
-    case is_set(Key) of
-        true ->
+    case global:whereis_name({kv, Key}) of
+        undefined ->
+            {ok, _} = if
+                Expire =:= infinity -> kv:start_link([Key, Value]);
+                true -> kv:start_link([Key, Value, Expire])
+            end;
+        Pid ->
             Message = if
                 Expire =:= infinity -> {set, Value};
                 true -> {set, Value, Expire}
             end,
-            gen_server:cast({global, get_global(Key)}, Message);
-        false ->
-            {ok, _} = if
-                Expire =:= infinity -> kv:start_link([Key, Value]);
-                true -> kv:start_link([Key, Value, Expire])
-            end
+            gen_server:cast(Pid, Message)
     end,
     ok.
 

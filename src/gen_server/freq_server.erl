@@ -3,23 +3,25 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2]).
+-export([start_link/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
     terminate/2, code_change/3]).
 
--record(state, {frequencies, used, timeout}).
+-record(state, {frequencies, used}).
 -record(used_frequency, {freq, ref, pid}).
+
 -define(SERVER, ?MODULE).
+-define(CLIENT_TIMEOUT, 10000).
 
 %% API
-start_link(Frequencies, Timeout) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [Frequencies, Timeout], []).
+start_link(Frequencies) ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, Frequencies, []).
 
 %% gen_server callbacks
-init([Frequencies, Timeout]) ->
-    {ok, #state{frequencies = Frequencies, used = [], timeout = Timeout}}.
+init(Frequencies) ->
+    {ok, #state{frequencies = Frequencies, used = []}}.
 
 handle_call(allocate, {From, _}, State) ->
     {ok, Reply, NewState} = allocate(From, State),
@@ -63,13 +65,7 @@ reserve_frequency(From, State) ->
     [Freq | Tail] = State#state.frequencies,
     Ref = erlang:make_ref(),
     Used = State#state.used ++ [#used_frequency{freq = Freq, ref = Ref, pid = From}],
-
-    if
-        is_number(State#state.timeout) ->
-            erlang:send_after(State#state.timeout, self(), {timeout, From, Ref});
-        true -> ok
-    end,
-
+    timer:send_after(?CLIENT_TIMEOUT, self(), {timeout, From, Ref}),
     State#state{frequencies = Tail, used = Used}.
 
 release_frequencies(From, State) ->

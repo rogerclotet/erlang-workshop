@@ -16,27 +16,31 @@
     code_change/4]).
 
 -define(FREQ_SERVER, freq_server).
+-define(HEARTBEAT_INTERVAL, 5000).
 
 -record(state, {}).
 
 %% API
 start_link(Name) ->
-    gen_fsm:start_link({local, Name}, ?MODULE, [], []).
+    gen_fsm:start_link({global, Name}, ?MODULE, [], []).
 
 connect(Name) ->
-    gen_fsm:send_event(Name, connect).
+    gen_fsm:send_event({global, Name}, connect).
 
 disconnect(Name) ->
-    gen_fsm:send_event(Name, disconnect).
+    gen_fsm:send_event({global, Name}, disconnect).
 
 %% gen_fsm callbacks
 init(_Args) ->
+    timer:send_interval(?HEARTBEAT_INTERVAL, send_heartbeat),
     {ok, not_connected, #state{}}.
 
 not_connected(connect, State) ->
     {ok, _} = gen_server:call(?FREQ_SERVER, allocate),
     io:format("Connected~n"),
-    {next_state, connected, State}.
+    {next_state, connected, State};
+not_connected(_Event, State) ->
+    {next_state, not_connected, State}.
 
 connected(disconnect, State) ->
     gen_server:call(?FREQ_SERVER, deallocate),
@@ -44,7 +48,12 @@ connected(disconnect, State) ->
     {next_state, not_connected, State};
 connected(frequency_expired, State) ->
     io:format("Frequency expired~n"),
-    {next_state, not_connected, State}.
+    {next_state, not_connected, State};
+connected(send_heartbeat, State) ->
+    {ok, _} = gen_server:call(?FREQ_SERVER, heartbeat),
+    {next_state, connected, State};
+connected(_Event, State) ->
+    {next_state, connected, State}.
 
 handle_event(_Event, StateName, State) ->
     {next_state, StateName, State}.
